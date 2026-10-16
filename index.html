@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Absence Email Generator</title>
+<style>
+:root{--bg:#f4f1ea;--card:#fffdf8;--ink:#10224a;--mut:#5d6579;--line:#ddd6c6;--blue:#0021a5;--orange:#fa4616;--hl:#ffe14d;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1426;--card:#151d35;--ink:#e9ecf6;--mut:#9ba5c0;--line:#2a3558;--blue:#8aa4ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif}
+main{max-width:880px;margin:0 auto;padding:28px 16px 60px}
+header{border-left:8px solid var(--orange);padding:4px 0 4px 16px;margin-bottom:22px}
+h1{font:800 30px/1.1 Georgia,"Times New Roman",serif;margin:0 0 6px;letter-spacing:-.5px}
+header p{margin:0;color:var(--mut)}
+h2{font:700 20px Georgia,serif;margin:34px 0 4px;padding-bottom:6px;border-bottom:3px double var(--line)}
+.sub{color:var(--mut);margin:0 0 10px;font-size:13px}
+.drop{display:block;border:2px dashed var(--blue);border-radius:10px;background:var(--card);padding:30px 16px;text-align:center;cursor:pointer}
+.drop.over{background:var(--hl);color:#000}
+.drop b{font-size:17px}.drop input{display:none}
+.drop span{display:block;color:var(--mut);font-size:13px;margin-top:4px}
+.opts{display:none;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:16px}
+.opts.on{display:grid}
+label.f{font-size:12px;font-weight:700;text-transform:uppercase;color:var(--mut);display:block}
+select,input[type=number],textarea,input[type=text]{width:100%;margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font:inherit}
+details{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 14px;display:none}
+details.on{display:block}
+summary{cursor:pointer;font-weight:700}
+textarea{min-height:170px;font-size:13px}
+.err{background:#fde8e4;color:#7a1608;border:1px solid #f0a99c;border-radius:8px;padding:12px;margin-top:16px;display:none}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:120px}
+.stat b{display:block;font:800 26px Georgia,serif;color:var(--blue)}
+.stat small{color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-top:4px solid var(--blue);border-radius:8px;padding:14px 16px;margin:14px 0}
+.card.x{border-top-color:var(--orange)}
+.card h3{margin:0 0 4px;font-size:16px}
+.lab{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:12px;font-weight:700;text-transform:uppercase;color:var(--mut)}
+.box{margin-top:4px;padding:10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:#000;font-size:14px;word-break:break-word}
+button{font:inherit;font-size:12px;font-weight:700;padding:4px 12px;border-radius:5px;border:1px solid var(--blue);background:var(--blue);color:#fff;cursor:pointer}
+@media(prefers-color-scheme:dark){button{color:#0e1426}}
+.warn{background:#fff3e0;color:#4a2a00;border:1px solid #f3b562;border-radius:8px;padding:12px;margin-top:14px}
+footer{margin-top:40px;color:var(--mut);font-size:12px}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Absence Email Generator</h1>
+  <p>Upload your attendance workbook and get copy-and-paste emails. Your file is processed in your browser and never uploaded anywhere.</p>
+</header>
+
+<label class="drop" id="drop">
+  <input type="file" id="file" accept=".xlsx,.xlsm,.xls">
+  <b>Drop your Excel file here, or click to choose</b>
+  <span id="fname">.xlsx / .xlsm / .xls</span>
+</label>
+
+<div class="err" id="err"></div>
+
+<div class="opts" id="opts">
+  <div><label class="f">Absence sheet</label><select id="absSheet"></select></div>
+  <div><label class="f">Student info sheet</label><select id="conSheet"></select></div>
+  <div><label class="f">Ineligible if absences over</label><input type="number" id="threshold" value="3" min="0"></div>
+  <div><label class="f">Email separator</label><select id="sep"><option value=", ">Comma (Gmail)</option><option value="; ">Semicolon (Outlook)</option></select></div>
+</div>
+
+<details id="wording">
+  <summary>Edit email wording</summary>
+  <p class="sub">Use <code>{name}</code> for the student's first name and <code>{absences_phrase}</code> for the highlighted absence count.</p>
+  <label class="f">Reminder subject</label><input type="text" id="subR">
+  <label class="f" style="margin-top:10px">Reminder body (1 to threshold absences)</label><textarea id="tplR"></textarea>
+  <label class="f" style="margin-top:10px">Ineligible subject</label><input type="text" id="subI">
+  <label class="f" style="margin-top:10px">Ineligible body</label><textarea id="tplI"></textarea>
+</details>
+
+<div id="out"></div>
+
+<footer>Rows hidden in Excel are skipped. Students with 0 absences get no email. Students are matched across sheets by first and last name.</footer>
+</main>
+
+<script src="xlsx.full.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const DEF = {
+  subR: "FRG Absence Check-In",
+  subI: "FRG Absences",
+  tplR: `Good afternoon,
+
+You are currently standing with {absences_phrase} in the First Responder Gator Course (Lab and Lecture combined).
+
+As a reminder, this course is hours based and you must complete a total of 40 hours to become First Responder Certified. Missed hours can be made up through reviews. A student may only make up a total of 6 hours (3 reviews). If you acquire more than 3 absences, you will become ineligible to take the final exam and become first responder certified.
+
+On the Home Page in Canvas you can find a schedule of these reviews as well as your attendance and review tracker. This tracker will list the number of reviews you still need to make up.
+
+If you have any concerns or believe there may be a discrepancy with your attendance record, please contact us promptly. Thank you for your immediate attention to this matter and let us know if you have any further questions or concerns.
+
+Best Regards,
+FRG Lab Coordinators`,
+  tplI: `Hello {name},
+
+Our records indicate that you have {absences_phrase} this semester. As outlined in the syllabus, you have accumulated more absences than is allowed per semester.
+
+Unfortunately, this means you will not be eligible to sit for the final exam or successfully complete the course this semester. However, you are more than welcome to retake the class next semester if you wish to earn your First Responder Certificate.
+
+If you have any questions or concerns, please don't hesitate to reach out to me. I would be happy to provide additional clarification or discuss any next steps with you.
+
+Best Regards,
+FRG Lab Coordinators`
+};
+for (const k in DEF) $(k).value = DEF[k];
+
+let wb = null;
+const norm = s => String(s).trim().replace(/\s+/g, " ").toLowerCase();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const val = (ws, r, c) => { const x = ws[XLSX.utils.encode_cell({r, c})]; return x ? x.v : undefined; };
+const isHidden = (ws, r) => { const x = ws["!rows"] && ws["!rows"][r]; return !!(x && x.hidden); };
+const rng = ws => XLSX.utils.decode_range(ws["!ref"] || "A1");
+const str = v => typeof v === "string" && v.trim() !== "";
+
+function readAbsences(ws) {
+  const R = rng(ws); let hr = -1, cF, cL, cA;
+  for (let r = R.s.r; r <= R.e.r && hr < 0; r++) {
+    const m = {};
+    for (let c = R.s.c; c <= R.e.c; c++) { const v = val(ws, r, c); if (typeof v === "string") m[norm(v)] = c; }
+    if ("total absences" in m) { hr = r; cA = m["total absences"]; cF = m["first"] ?? m["first name"]; cL = m["last"] ?? m["last name"]; }
+  }
+  if (hr < 0) throw new Error('Could not find a "Total Absences" column in the absence sheet.');
+  if (cF == null || cL == null) throw new Error('Could not find "First" and "Last" columns in the same header row as "Total Absences".');
+  const out = new Map();
+  for (let r = hr + 1; r <= R.e.r; r++) {
+    if (isHidden(ws, r)) continue;
+    const f = val(ws, r, cF), l = val(ws, r, cL), a = val(ws, r, cA);
+    if (typeof a !== "number" || !str(f) || !str(l)) continue; // skips day/course banner rows
+    const k = norm(f) + " " + norm(l), old = out.get(k);
+    if (!old || a > old.count) out.set(k, {name: f.trim() + " " + l.trim(), first: f.trim(), count: a});
+  }
+  return out;
+}
+
+function readContacts(ws) {
+  const R = rng(ws), blocks = [];
+  for (let r = R.s.r; r <= R.e.r; r++) {
+    const cells = [];
+    for (let c = R.s.c; c <= R.e.c; c++) { const v = val(ws, r, c); if (typeof v === "string") cells.push([norm(v), c]); }
+    const fs = cells.filter(x => x[0] === "first name").map(x => x[1]);
+    fs.forEach((fc, i) => {
+      const end = i + 1 < fs.length ? fs[i + 1] : R.e.c + 1;
+      const inb = cells.filter(x => x[1] >= fc && x[1] < end);
+      const l = inb.find(x => x[0] === "last name"), e = inb.find(x => x[0] === "email");
+      if (l && e) blocks.push({r, f: fc, l: l[1], e: e[1]});
+    });
+  }
+  if (!blocks.length) throw new Error('Could not find any "First Name / Last Name / Email" headers in the student info sheet.');
+  const out = new Map();
+  for (const b of blocks) for (let r = b.r + 1; r <= R.e.r; r++) {
+    const f = val(ws, r, b.f), l = val(ws, r, b.l), e = val(ws, r, b.e);
+    if (!str(f) || !str(l) || !str(e) || !e.includes("@")) continue;
+    out.set(norm(f) + " " + norm(l), e.trim());
+  }
+  return out;
+}
+
+const MS = "\u0000", ME = "\u0001";
+function bodyHtml(tpl, name, phrase) {
+  const t = tpl.replaceAll("{name}", name).replaceAll("{absences_phrase}", MS + phrase + ME);
+  return t.split(/\n\s*\n/).map(p =>
+    '<p style="margin:0 0 1em 0;">' + esc(p).replaceAll("\n", "<br>")
+      .replaceAll(MS, '<mark style="background-color:#ffff00;color:#000000;">').replaceAll(ME, "</mark>") + "</p>").join("");
+}
+
+let uid = 0;
+function field(label, inner) {
+  const id = "f" + (++uid);
+  return `<div class="lab"><span>${label}</span><button data-copy="${id}">Copy</button></div><div class="box" id="${id}">${inner}</div>`;
+}
+
+function showErr(msg) { const e = $("err"); e.textContent = msg; e.style.display = msg ? "block" : "none"; }
+
+function generate() {
+  if (!wb) return;
+  showErr(""); uid = 0;
+  let abs, con;
+  try {
+    abs = readAbsences(wb.Sheets[$("absSheet").value]);
+    con = readContacts(wb.Sheets[$("conSheet").value]);
+  } catch (e) { $("out").innerHTML = ""; showErr(e.message); return; }
+
+  const th = Number($("threshold").value) || 0, sep = $("sep").value;
+  const groups = new Map(), inel = [], miss = [];
+  for (const [k, s] of abs) {
+    if (s.count <= 0) continue;
+    const email = con.get(k);
+    if (!email) { miss.push(s); continue; }
+    if (s.count > th) inel.push({...s, email});
+    else { if (!groups.has(s.count)) groups.set(s.count, []); groups.get(s.count).push(email); }
+  }
+
+  const sorted = [...groups.keys()].sort((a, b) => a - b);
+  let h = `<div class="stats">
+    <div class="stat"><b>${abs.size}</b><small>students read</small></div>
+    <div class="stat"><b>${sorted.length}</b><small>reminder emails</small></div>
+    <div class="stat"><b>${inel.length}</b><small>individual emails</small></div>
+    <div class="stat"><b>${miss.length}</b><small>no email found</small></div></div>`;
+
+  h += `<h2>Reminder emails</h2><p class="sub">One email per absence count. Paste the addresses into BCC.</p>`;
+  if (!sorted.length) h += "<p>None.</p>";
+  for (const n of sorted) {
+    const word = n === 1 ? "absence" : "absences", list = groups.get(n);
+    h += `<div class="card"><h3>${n} ${word} &middot; ${list.length} student${list.length === 1 ? "" : "s"}</h3>`
+      + field("BCC", esc(list.join(sep)))
+      + field("Subject", esc($("subR").value))
+      + field("Body", bodyHtml($("tplR").value, "", `${n} total ${word}`)) + "</div>";
+  }
+
+  h += `<h2>Ineligible emails</h2><p class="sub">Send each of these separately.</p>`;
+  if (!inel.length) h += "<p>None.</p>";
+  for (const s of inel) {
+    h += `<div class="card x"><h3>${esc(s.name)} &middot; ${s.count} absences</h3>`
+      + field("To", esc(s.email))
+      + field("Subject", esc($("subI").value))
+      + field("Body", bodyHtml($("tplI").value, s.first, `${s.count} absences`)) + "</div>";
+  }
+
+  if (miss.length) h += `<h2>No email found</h2><div class="warn">These names are on the absence sheet but not on the student info sheet (spelling mismatch?). Handle them manually:<ul>`
+    + miss.map(s => `<li>${esc(s.name)} (${s.count} absences)</li>`).join("") + "</ul></div>";
+  $("out").innerHTML = h;
+}
+
+document.addEventListener("click", ev => {
+  const btn = ev.target.closest("[data-copy]"); if (!btn) return;
+  const range = document.createRange(); range.selectNodeContents($(btn.dataset.copy));
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+  document.execCommand("copy"); sel.removeAllRanges();
+  btn.textContent = "Copied!"; setTimeout(() => btn.textContent = "Copy", 1400);
+});
+
+async function load(file) {
+  if (!file) return;
+  try {
+    wb = XLSX.read(await file.arrayBuffer(), {type: "array", cellStyles: true});
+  } catch (e) { showErr("Could not read that file. Is it a valid Excel workbook?"); return; }
+  $("fname").textContent = file.name;
+  const names = wb.SheetNames, opts = names.map(n => `<option>${esc(n)}</option>`).join("");
+  $("absSheet").innerHTML = opts; $("conSheet").innerHTML = opts;
+  const pick = (re, fb) => names.find(n => re.test(n)) ?? names[fb] ?? names[0];
+  $("absSheet").value = pick(/eligib|absen|attend/i, 0);
+  $("conSheet").value = pick(/info|contact|email|roster/i, 1);
+  $("opts").classList.add("on"); $("wording").classList.add("on");
+  generate();
+}
+
+$("file").addEventListener("change", e => load(e.target.files[0]));
+const drop = $("drop");
+["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => load(e.dataTransfer.files[0]));
+["absSheet", "conSheet", "threshold", "sep"].forEach(id => $(id).addEventListener("input", generate));
+["subR", "subI", "tplR", "tplI"].forEach(id => $(id).addEventListener("input", generate));
+</script>
+</body>
+</html>
